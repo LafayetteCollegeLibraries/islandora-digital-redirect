@@ -7,10 +7,11 @@ include Mongo
 @logger = Logger.new(STDOUT)
 @logger.level = Logger::DEBUG
 
-mongoHost='139.147.4.144'
+mongoHost='localhost'
 mongoPort='27017'
 mongoDb='islandora_redirect'
 mongoColl='objects'
+MONGO_ENABLED = false
 
 require 'mechanize'
 
@@ -72,7 +73,20 @@ end
 
 get '/cdm4/document.php' do
 
-  cdm_collection_alias = params[:CISOROOT].sub('/', '')
+  # @todo Refactor
+  unless params.has_key? 'CISOROOT'
+
+    redirect "http://digital.lafayette.edu/collections", 302
+  end
+  cdm_collection_alias = params[:CISOROOT].split('/').last
+
+  # @todo Refactor
+  redirect_uri = "http://digital.lafayette.edu/collections/#{islandora_collection_alias(cdm_collection_alias)}"
+  unless params.has_key? 'CISOPTR'
+
+    redirect redirect_uri, 302
+  end
+
   cdm_object_id = params[:CISOPTR]
 
   if CDM_COLL_ALIASES.include? cdm_collection_alias
@@ -83,26 +97,46 @@ end
 
 get '/cdm4/item_viewer.php' do
 
-  cdm_collection_alias = params[:CISOROOT].sub('/', '')
+  if not params.has_key? 'CISOROOT'
+
+    redirect "http://digital.lafayette.edu/collections", 302
+  end
+
+  # Not decoding?
+  cdm_collection_alias = params[:CISOROOT].split('2F').last
+  cdm_collection_alias = params[:CISOROOT].split('/').last
+
+  redirect_uri = "http://digital.lafayette.edu/collections/#{islandora_collection_alias(cdm_collection_alias)}"
+
+  if not params.has_key? 'CISOPTR'
+
+    redirect redirect_uri, 302
+  end
   cdm_object_id = params[:CISOPTR]
 
   if CDM_COLL_ALIASES.include? cdm_collection_alias
 
-    redirect "http://cdm.lafayette.edu/cdm4/item_viewer.php?CISOROOT=/#{cdm_collection_alias}&CISOPTR=#{cdm_object_id}&CISOBOX=1", 302
+    # redirect "http://cdm.lafayette.edu/cdm4/item_viewer.php?CISOROOT=/#{cdm_collection_alias}&CISOPTR=#{cdm_object_id}&CISOBOX=1", 302
+    redirect "http://cdm.lafayette.edu", 302
   end
 
-  redirect_uri = "http://digital.lafayette.edu/collections/#{islandora_collection_alias(cdm_collection_alias)}/browse"
-
   # Caching
-  @mongo = MongoClient.new(mongoHost, mongoPort)[mongoDb][mongoColl]
-  mongo_doc = @mongo.find_one(:cdmColl => cdm_collection_alias, :cdmId => cdm_object_id)
+  mongo_doc = nil
+  if MONGO_ENABLED
+
+    @mongo = MongoClient.new(mongoHost, mongoPort)[mongoDb][mongoColl]
+    mongo_doc = @mongo.find_one(:cdmColl => cdm_collection_alias, :cdmId => cdm_object_id)
+  end
   if mongo_doc
 
     redirect_uri = "http://digital.lafayette.edu/#{mongo_doc['islandoraPathAlias']}"
   else
 
+    redirect_uri = "http://digital.lafayette.edu/collections/#{islandora_collection_alias(cdm_collection_alias)}"
+
+=begin
     agent = Mechanize.new
-    agent.get 'http://cdm.lafayette.edu/cdm4/item_viewer.php', params do |page|
+    agent.get 'http://cdm.lafayette.edu/cdm4/item_viewer.php', {:CISOROOT => '/' + cdm_collection_alias, :CISOPTR => cdm_object_id} do |page|
 
       metadb_url = page.links_with(:href => /metadb\.lafayette\.edu/).first.href
 
@@ -118,10 +152,11 @@ get '/cdm4/item_viewer.php' do
       end
 
       islandora_path_alias = "collections/#{islandora_collection_alias(cdm_collection_alias, :object_alias => islandora_object_alias)}"
-      @mongo.insert(:cdmColl => cdm_collection_alias, :cdmId => cdm_object_id, :islandoraPathAlias => islandora_path_alias)
+      @mongo.insert(:cdmColl => cdm_collection_alias, :cdmId => cdm_object_id, :islandoraPathAlias => islandora_path_alias) if MONGO_ENABLED
 
       redirect_uri = "http://digital.lafayette.edu/#{islandora_path_alias}"
     end
+=end
   end
 
   redirect redirect_uri, 301
